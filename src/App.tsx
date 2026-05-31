@@ -1,752 +1,365 @@
-import { useEffect, useMemo, useState } from 'react';
-import './App.css';
+import { useEffect, useMemo, useState } from "react";
+import "./App.css";
+import AiSupport from "./components/AiSupport";
+import BmiCalculator from "./components/BmiCalculator";
+import BodyFatCalculator from "./components/BodyFatCalculator";
+import DashboardHeader from "./components/DashboardHeader";
+import ExerciseLibrary from "./components/ExerciseLibrary";
+import HomePage from "./components/HomePage";
+import Sidebar from "./components/Sidebar";
+import StatsGrid from "./components/StatsGrid";
+import WorkoutSection from "./components/WorkoutSection";
+import {
+  DAYS,
+  EXERCISE_GUIDE,
+  USER_PROFILE,
+  WEEKLY_WORKOUTS,
+} from "./data/workouts";
+import type {
+  AppView,
+  ChatMessage,
+  DailyWorkoutSummary,
+  NewExerciseInput,
+  StepLog,
+  WeeklyWorkoutPlan,
+  WorkoutDay,
+  WorkoutSet,
+} from "./types";
 
-type DayName =
-  | 'Monday'
-  | 'Tuesday'
-  | 'Wednesday'
-  | 'Thursday'
-  | 'Friday'
-  | 'Saturday'
-  | 'Sunday';
+const STORAGE_KEY = "gym-tracker-workouts";
+const STEPS_STORAGE_KEY = "gym-tracker-steps";
+const CHAT_STORAGE_KEY = "gym-tracker-chat";
+const CHAT_API_URL =
+  import.meta.env.VITE_CHAT_API_URL ?? "http://127.0.0.1:5000/gymchat";
 
-interface ExerciseSet {
-  id: string;
-  reps: number;
-  weight: number;
-}
+function loadWorkoutPlan(): WeeklyWorkoutPlan {
+  const savedPlan = localStorage.getItem(STORAGE_KEY);
 
-interface Exercise {
-  id: string;
-  name: string;
-  sets: ExerciseSet[];
-}
-
-interface DayWorkout {
-  durationSeconds: number;
-  exercises: Exercise[];
-}
-
-interface WeekPlan {
-  id: string;
-  label: string;
-  days: Record<DayName, DayWorkout>;
-}
-
-interface UserProfile {
-  id: string;
-  name: string;
-  email: string;
-  age: number;
-  goal: string;
-  password: string;
-  weeks: WeekPlan[];
-}
-
-interface LoginForm {
-  email: string;
-  password: string;
-}
-
-interface ExerciseForm {
-  name: string;
-  reps: number;
-  weight: number;
-}
-
-type LegacySet = ExerciseSet & { count?: number; kg?: number };
-type LegacyUser = Partial<UserProfile> & {
-  workouts?: Record<DayName, Exercise[]>;
-  weeks?: WeekPlan[];
-};
-
-const STORAGE_KEY = 'gym-tracker-users-json';
-const SESSION_KEY = 'gym-tracker-current-user';
-const DAYS: DayName[] = [
-  'Monday',
-  'Tuesday',
-  'Wednesday',
-  'Thursday',
-  'Friday',
-  'Saturday',
-  'Sunday',
-];
-const WEEKS = [
-  { id: 'week-1', label: 'Week 1' },
-  { id: 'week-2', label: 'Week 2' },
-  { id: 'week-3', label: 'Week 3' },
-];
-
-const emptyDay = (): DayWorkout => ({
-  durationSeconds: 0,
-  exercises: [],
-});
-
-const emptyDays = (): Record<DayName, DayWorkout> => ({
-  Monday: emptyDay(),
-  Tuesday: emptyDay(),
-  Wednesday: emptyDay(),
-  Thursday: emptyDay(),
-  Friday: emptyDay(),
-  Saturday: emptyDay(),
-  Sunday: emptyDay(),
-});
-
-const emptyWeeks = (): WeekPlan[] =>
-  WEEKS.map((week) => ({
-    ...week,
-    days: emptyDays(),
-  }));
-
-const seedUsers: UserProfile[] = [
-  {
-    id: 'user-1',
-    name: 'Harish',
-    email: 'harish@gym.com',
-    age: 24,
-    goal: 'Build strength and track progressive overload',
-    password: '123456',
-    weeks: [
-      {
-        id: 'week-1',
-        label: 'Week 1',
-        days: {
-          ...emptyDays(),
-          Monday: {
-            durationSeconds: 45 * 60,
-            exercises: [
-              {
-                id: 'ex-1',
-                name: 'Bench Press',
-                sets: [
-                  { id: 'set-1', reps: 10, weight: 40 },
-                  { id: 'set-2', reps: 8, weight: 45 },
-                  { id: 'set-3', reps: 6, weight: 50 },
-                ],
-              },
-              {
-                id: 'ex-2',
-                name: 'Incline Dumbbell Press',
-                sets: [
-                  { id: 'set-4', reps: 12, weight: 18 },
-                  { id: 'set-5', reps: 10, weight: 20 },
-                ],
-              },
-            ],
-          },
-        },
-      },
-      ...emptyWeeks().slice(1),
-    ],
-  },
-  {
-    id: 'user-2',
-    name: 'Demo User',
-    email: 'demo@gym.com',
-    age: 28,
-    goal: 'Stay consistent with weekly training',
-    password: 'demo123',
-    weeks: [
-      {
-        id: 'week-1',
-        label: 'Week 1',
-        days: {
-          ...emptyDays(),
-          Monday: {
-            durationSeconds: 30 * 60,
-            exercises: [
-              {
-                id: 'ex-3',
-                name: 'Squat',
-                sets: [
-                  { id: 'set-6', reps: 8, weight: 60 },
-                  { id: 'set-7', reps: 8, weight: 65 },
-                ],
-              },
-            ],
-          },
-        },
-      },
-      ...emptyWeeks().slice(1),
-    ],
-  },
-];
-
-const createId = (prefix: string) =>
-  `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-
-const normalizeSet = (set: LegacySet): ExerciseSet => ({
-  id: set.id || createId('set'),
-  reps: set.reps ?? set.count ?? 0,
-  weight: set.weight ?? set.kg ?? 0,
-});
-
-const normalizeExercises = (exercises: Exercise[] = []) =>
-  exercises.map((exercise) => ({
-    ...exercise,
-    id: exercise.id || createId('exercise'),
-    sets: exercise.sets.map((set) => normalizeSet(set as LegacySet)),
-  }));
-
-const normalizeDay = (day?: Partial<DayWorkout>): DayWorkout => ({
-  durationSeconds: day?.durationSeconds ?? 0,
-  exercises: normalizeExercises(day?.exercises),
-});
-
-const normalizeWeeks = (user: LegacyUser): WeekPlan[] => {
-  if (user.weeks?.length) {
-    return WEEKS.map((week, index) => {
-      const savedWeek = user.weeks?.[index];
-
-      return {
-        id: week.id,
-        label: week.label,
-        days: DAYS.reduce((days, day) => {
-          days[day] = normalizeDay(savedWeek?.days?.[day]);
-          return days;
-        }, emptyDays()),
-      };
-    });
-  }
-
-  return WEEKS.map((week, index) => ({
-    id: week.id,
-    label: week.label,
-    days: DAYS.reduce((days, day) => {
-      days[day] =
-        index === 0
-          ? {
-              durationSeconds: 0,
-              exercises: normalizeExercises(user.workouts?.[day]),
-            }
-          : emptyDay();
-      return days;
-    }, emptyDays()),
-  }));
-};
-
-const normalizeUsers = (savedUsers: LegacyUser[]): UserProfile[] =>
-  savedUsers.map((user) => ({
-    id: user.id || createId('user'),
-    name: user.name || 'Gym User',
-    email: user.email || '',
-    age: user.age || 0,
-    goal: user.goal || 'Track workouts',
-    password: user.password || '',
-    weeks: normalizeWeeks(user),
-  }));
-
-const getStoredUsers = () => {
-  const savedUsers = localStorage.getItem(STORAGE_KEY);
-
-  if (!savedUsers) {
-    return seedUsers;
+  if (!savedPlan) {
+    return WEEKLY_WORKOUTS;
   }
 
   try {
-    return normalizeUsers(JSON.parse(savedUsers) as LegacyUser[]);
+    const parsedPlan = JSON.parse(savedPlan) as Partial<WeeklyWorkoutPlan>;
+
+    return DAYS.reduce<WeeklyWorkoutPlan>(
+      (plan, day) => ({
+        ...plan,
+        [day]: parsedPlan[day] ?? WEEKLY_WORKOUTS[day] ?? [],
+      }),
+      {} as WeeklyWorkoutPlan
+    );
   } catch {
-    return seedUsers;
+    return WEEKLY_WORKOUTS;
   }
-};
+}
 
-const formatDuration = (totalSeconds: number) => {
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
+function loadStepLog(): StepLog {
+  const savedSteps = localStorage.getItem(STEPS_STORAGE_KEY);
 
-  return [hours, minutes, seconds]
-    .map((item) => item.toString().padStart(2, '0'))
-    .join(':');
-};
+  if (!savedSteps) {
+    return DAYS.reduce<StepLog>(
+      (steps, day) => ({ ...steps, [day]: 0 }),
+      {} as StepLog
+    );
+  }
+
+  try {
+    const parsedSteps = JSON.parse(savedSteps) as Partial<StepLog>;
+
+    return DAYS.reduce<StepLog>(
+      (steps, day) => ({ ...steps, [day]: parsedSteps[day] ?? 0 }),
+      {} as StepLog
+    );
+  } catch {
+    return DAYS.reduce<StepLog>(
+      (steps, day) => ({ ...steps, [day]: 0 }),
+      {} as StepLog
+    );
+  }
+}
+
+function loadChatMessages(): ChatMessage[] {
+  const savedMessages = localStorage.getItem(CHAT_STORAGE_KEY);
+
+  if (!savedMessages) {
+    return [
+      {
+        id: 1,
+        role: "bot",
+        text: "Hi, I am your gym bot. Ask me about your workouts, steps, calories, or what to train next.",
+        createdAt: new Date().toISOString(),
+      },
+    ];
+  }
+
+  try {
+    const parsedMessages = JSON.parse(savedMessages) as ChatMessage[];
+
+    if (!Array.isArray(parsedMessages)) {
+      return [];
+    }
+
+    return parsedMessages.filter(
+      (message) =>
+        typeof message.id === "number" &&
+        (message.role === "user" || message.role === "bot") &&
+        typeof message.text === "string" &&
+        typeof message.createdAt === "string"
+    );
+  } catch {
+    return [];
+  }
+}
+
+function calculateCalories(totalWeight: number, totalReps: number) {
+  return Math.round(totalWeight * 0.05 + totalReps * 0.25);
+}
 
 function App() {
-  const [users, setUsers] = useState<UserProfile[]>(getStoredUsers);
-  const [currentUserId, setCurrentUserId] = useState(
-    () => localStorage.getItem(SESSION_KEY) || ''
-  );
-  const [loginForm, setLoginForm] = useState<LoginForm>({
-    email: 'harish@gym.com',
-    password: '123456',
-  });
-  const [loginError, setLoginError] = useState('');
-  const [selectedWeekId, setSelectedWeekId] = useState('week-1');
-  const [selectedDay, setSelectedDay] = useState<DayName>('Monday');
-  const [runningTimer, setRunningTimer] = useState(false);
-  const [exerciseForm, setExerciseForm] = useState<ExerciseForm>({
-    name: '',
-    reps: 10,
-    weight: 0,
-  });
+  const [currentView, setCurrentView] = useState<AppView>("home");
+  const [selectedDay, setSelectedDay] = useState<WorkoutDay>("Day 1");
+  const [workoutPlan, setWorkoutPlan] = useState<WeeklyWorkoutPlan>(loadWorkoutPlan);
+  const [stepLog, setStepLog] = useState<StepLog>(loadStepLog);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(loadChatMessages);
+  const [isChatSending, setIsChatSending] = useState(false);
+  const exercises = workoutPlan[selectedDay];
 
-  const currentUser = useMemo(
-    () => users.find((user) => user.id === currentUserId),
-    [users, currentUserId]
-  );
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(workoutPlan));
+  }, [workoutPlan]);
 
-  const selectedWeek =
-    currentUser?.weeks.find((week) => week.id === selectedWeekId) ||
-    currentUser?.weeks[0];
-  const selectedWorkout = selectedWeek?.days[selectedDay] || emptyDay();
-  const selectedExercises = selectedWorkout.exercises;
-  const totalSets = selectedExercises.reduce(
-    (total, exercise) => total + exercise.sets.length,
-    0
-  );
-  const totalWeight = selectedExercises.reduce(
-    (total, exercise) =>
-      total +
-      exercise.sets.reduce(
-        (exerciseTotal, set) => exerciseTotal + set.reps * set.weight,
+  useEffect(() => {
+    localStorage.setItem(STEPS_STORAGE_KEY, JSON.stringify(stepLog));
+  }, [stepLog]);
+
+  useEffect(() => {
+    localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(chatMessages));
+  }, [chatMessages]);
+
+  const dashboardStats = useMemo(() => {
+    const allExercises = Object.values(workoutPlan).flat();
+    const totalVolume = allExercises.reduce((exerciseTotal, exercise) => {
+      const setVolume = exercise.sets.reduce(
+        (setTotal, set) => setTotal + set.reps * set.weight,
         0
-      ),
-    0
-  );
+      );
 
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(users));
-  }, [users]);
+      return exerciseTotal + setVolume;
+    }, 0);
+    const activeDays = Object.values(workoutPlan).filter(
+      (dayExercises) => dayExercises.length > 0
+    ).length;
 
-  useEffect(() => {
-    if (currentUserId) {
-      localStorage.setItem(SESSION_KEY, currentUserId);
-    } else {
-      localStorage.removeItem(SESSION_KEY);
-    }
-  }, [currentUserId]);
+    return [
+      { label: "Total Exercises", value: String(allExercises.length) },
+      { label: "Total Volume", value: `${totalVolume.toLocaleString()} kg` },
+      { label: "Workout Time", value: "01:24:12" },
+      { label: "Weekly Streak", value: `${activeDays} Days` },
+    ];
+  }, [workoutPlan]);
 
-  useEffect(() => {
-    setRunningTimer(false);
-  }, [selectedWeekId, selectedDay, currentUserId]);
+  const dailySummaries = useMemo<DailyWorkoutSummary[]>(() => {
+    return DAYS.map((day) => {
+      const dayExercises = workoutPlan[day] ?? [];
+      const totals = dayExercises.reduce(
+        (dayTotal, exercise) => {
+          const exerciseTotals = exercise.sets.reduce(
+            (setTotal, set) => ({
+              reps: setTotal.reps + set.reps,
+              weight: setTotal.weight + set.reps * set.weight,
+            }),
+            { reps: 0, weight: 0 }
+          );
 
-  useEffect(() => {
-    if (!runningTimer || !currentUser || !selectedWeek) {
-      return;
-    }
+          return {
+            reps: dayTotal.reps + exerciseTotals.reps,
+            weight: dayTotal.weight + exerciseTotals.weight,
+          };
+        },
+        { reps: 0, weight: 0 }
+      );
 
-    const timerId = window.setInterval(() => {
-      updateSelectedDay((day) => ({
-        ...day,
-        durationSeconds: day.durationSeconds + 1,
-      }));
-    }, 1000);
+      return {
+        day,
+        exerciseCount: dayExercises.length,
+        totalReps: totals.reps,
+        totalWeight: totals.weight,
+        caloriesBurned: calculateCalories(totals.weight, totals.reps),
+        steps: stepLog[day] ?? 0,
+      };
+    });
+  }, [stepLog, workoutPlan]);
 
-    return () => window.clearInterval(timerId);
-  }, [runningTimer, currentUser, selectedWeek, selectedDay]);
-
-  const updateSelectedDay = (updater: (day: DayWorkout) => DayWorkout) => {
-    if (!currentUser || !selectedWeek) {
-      return;
-    }
-
-    setUsers((currentUsers) =>
-      currentUsers.map((user) =>
-        user.id === currentUser.id
-          ? {
-              ...user,
-              weeks: user.weeks.map((week) =>
-                week.id === selectedWeek.id
-                  ? {
-                      ...week,
-                      days: {
-                        ...week.days,
-                        [selectedDay]: updater(week.days[selectedDay]),
-                      },
-                    }
-                  : week
-              ),
-            }
-          : user
-      )
-    );
-  };
-
-  const loginUser = (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
-    const user = users.find(
-      (item) =>
-        item.email.toLowerCase() === loginForm.email.trim().toLowerCase() &&
-        item.password === loginForm.password
-    );
-
-    if (!user) {
-      setLoginError('Email or password is wrong. Try the demo login shown below.');
-      return;
-    }
-
-    setLoginError('');
-    setCurrentUserId(user.id);
-    setSelectedWeekId('week-1');
-    setSelectedDay('Monday');
-  };
-
-  const logoutUser = () => {
-    setCurrentUserId('');
-    setLoginError('');
-    setRunningTimer(false);
-  };
-
-  const addExercise = (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
-    if (!currentUser || !exerciseForm.name.trim()) {
-      return;
-    }
-
-    const nextExercise: Exercise = {
-      id: createId('exercise'),
-      name: exerciseForm.name.trim(),
-      sets: [
+  function handleAddExercise(newExercise: NewExerciseInput) {
+    setWorkoutPlan((currentPlan) => ({
+      ...currentPlan,
+      [selectedDay]: [
+        ...currentPlan[selectedDay],
         {
-          id: createId('set'),
-          reps: exerciseForm.reps,
-          weight: exerciseForm.weight,
+          id: Date.now(),
+          name: newExercise.name,
+          category: "Custom",
+          sets: [{ reps: newExercise.reps, weight: newExercise.weight }],
         },
       ],
-    };
-
-    updateSelectedDay((day) => ({
-      ...day,
-      exercises: [nextExercise, ...day.exercises],
     }));
+  }
 
-    setExerciseForm({ name: '', reps: 10, weight: 0 });
-  };
-
-  const addSet = (exerciseId: string) => {
-    updateSelectedDay((day) => ({
-      ...day,
-      exercises: day.exercises.map((exercise) => {
-        if (exercise.id !== exerciseId) {
-          return exercise;
-        }
-
-        const previousSet = exercise.sets[exercise.sets.length - 1];
-
-        return {
-          ...exercise,
-          sets: [
-            ...exercise.sets,
-            {
-              id: createId('set'),
-              reps: previousSet?.reps || 10,
-              weight: previousSet?.weight || 0,
-            },
-          ],
-        };
-      }),
+  function handleRemoveExercise(exerciseId: number) {
+    setWorkoutPlan((currentPlan) => ({
+      ...currentPlan,
+      [selectedDay]: currentPlan[selectedDay].filter(
+        (exercise) => exercise.id !== exerciseId
+      ),
     }));
-  };
+  }
 
-  const updateSet = (
-    exerciseId: string,
-    setId: string,
-    field: 'reps' | 'weight',
-    value: number
-  ) => {
-    updateSelectedDay((day) => ({
-      ...day,
-      exercises: day.exercises.map((exercise) =>
+  function handleAddSet(exerciseId: number, newSet: WorkoutSet) {
+    setWorkoutPlan((currentPlan) => ({
+      ...currentPlan,
+      [selectedDay]: currentPlan[selectedDay].map((exercise) =>
         exercise.id === exerciseId
-          ? {
-              ...exercise,
-              sets: exercise.sets.map((set) =>
-                set.id === setId ? { ...set, [field]: value } : set
-              ),
-            }
+          ? { ...exercise, sets: [...exercise.sets, newSet] }
           : exercise
       ),
     }));
-  };
-
-  const removeExercise = (exerciseId: string) => {
-    updateSelectedDay((day) => ({
-      ...day,
-      exercises: day.exercises.filter((exercise) => exercise.id !== exerciseId),
-    }));
-  };
-
-  const resetTimer = () => {
-    setRunningTimer(false);
-    updateSelectedDay((day) => ({
-      ...day,
-      durationSeconds: 0,
-    }));
-  };
-
-  if (!currentUser) {
-    return (
-      <main className="auth-page">
-        <section className="login-card">
-          <p className="eyebrow">React JSON Gym Tracker</p>
-          <h1>Login to your workout plan</h1>
-          <p className="muted">
-            User data is fetched from React JSON and stored in browser local
-            storage after every change.
-          </p>
-
-          <form className="login-form" onSubmit={loginUser}>
-            <label>
-              Email
-              <input
-                type="email"
-                value={loginForm.email}
-                onChange={(event) =>
-                  setLoginForm({ ...loginForm, email: event.target.value })
-                }
-                placeholder="harish@gym.com"
-              />
-            </label>
-
-            <label>
-              Password
-              <input
-                type="password"
-                value={loginForm.password}
-                onChange={(event) =>
-                  setLoginForm({ ...loginForm, password: event.target.value })
-                }
-                placeholder="123456"
-              />
-            </label>
-
-            {loginError && <p className="error-text">{loginError}</p>}
-
-            <button type="submit">Login</button>
-          </form>
-
-          <div className="demo-box">
-            Demo login: <strong>harish@gym.com</strong> / <strong>123456</strong>
-          </div>
-        </section>
-      </main>
-    );
   }
 
+  function handleSaveSteps(day: WorkoutDay, steps: number) {
+    setStepLog((currentSteps) => ({
+      ...currentSteps,
+      [day]: steps,
+    }));
+  }
+
+  async function handleSendChatMessage(text: string) {
+    const now = Date.now();
+    const trimmedText = text.trim();
+
+    if (!trimmedText) {
+      return;
+    }
+
+    setChatMessages((currentMessages) => [
+      ...currentMessages,
+      {
+        id: now,
+        role: "user",
+        text: trimmedText,
+        createdAt: new Date(now).toISOString(),
+      },
+    ]);
+
+    setIsChatSending(true);
+
+    try {
+      const response = await fetch(CHAT_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          message: trimmedText,
+          summaries: dailySummaries,
+          workouts: workoutPlan,
+          steps: stepLog,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Chat backend request failed");
+      }
+
+      const data = (await response.json()) as {
+        reply?: string;
+        response?: string;
+        message?: string;
+      };
+      const botReply =
+        data.reply ??
+        data.response ??
+        data.message ??
+        "I received your question, but the backend did not return a reply.";
+
+      setChatMessages((currentMessages) => [
+        ...currentMessages,
+        {
+          id: Date.now(),
+          role: "bot",
+          text: botReply,
+          createdAt: new Date().toISOString(),
+        },
+      ]);
+    } catch {
+      setChatMessages((currentMessages) => [
+        ...currentMessages,
+        {
+          id: Date.now(),
+          role: "bot",
+          text: "I could not reach the chat backend. Please check VITE_CHAT_API_URL and make sure your backend is running.",
+          createdAt: new Date().toISOString(),
+        },
+      ]);
+    } finally {
+      setIsChatSending(false);
+    }
+  }
+
+  const browserJson = {
+    workouts: workoutPlan,
+    steps: stepLog,
+  };
+
   return (
-    <main className="app-shell">
-      <header className="app-header">
-        <div>
-          <p className="eyebrow">Welcome back</p>
-          <h1>{currentUser.name}'s Gym Tracker</h1>
-          <p className="muted">{currentUser.goal}</p>
-        </div>
-        <button className="secondary-button" type="button" onClick={logoutUser}>
-          Logout
-        </button>
-      </header>
+    <div className="app">
+      <Sidebar
+        days={DAYS}
+        profile={USER_PROFILE}
+        currentView={currentView}
+        selectedDay={selectedDay}
+        onSelectView={setCurrentView}
+        onSelectDay={setSelectedDay}
+      />
 
-      <section className="profile-grid">
-        <article className="stat-card">
-          <span>User</span>
-          <strong>{currentUser.name}</strong>
-        </article>
-        <article className="stat-card">
-          <span>Email</span>
-          <strong>{currentUser.email}</strong>
-        </article>
-        <article className="stat-card">
-          <span>Age</span>
-          <strong>{currentUser.age}</strong>
-        </article>
-      </section>
-
-      <section className="week-tabs" aria-label="Week selector">
-        {currentUser.weeks.map((week) => (
-          <button
-            key={week.id}
-            type="button"
-            className={week.id === selectedWeekId ? 'week-tab active' : 'week-tab'}
-            onClick={() => setSelectedWeekId(week.id)}
-          >
-            {week.label}
-          </button>
-        ))}
-      </section>
-
-      <section className="tracker-layout">
-        <aside className="day-panel">
-          <h2>{selectedWeek?.label} Days</h2>
-          <div className="day-list">
-            {DAYS.map((day) => (
-              <button
-                key={day}
-                type="button"
-                className={day === selectedDay ? 'day-button active' : 'day-button'}
-                onClick={() => setSelectedDay(day)}
-              >
-                <span>{day}</span>
-                <small>{selectedWeek?.days[day].exercises.length || 0} exercises</small>
-              </button>
-            ))}
-          </div>
-        </aside>
-
-        <section className="workout-panel">
-          <div className="section-header">
-            <div>
-              <p className="eyebrow">Selected day</p>
-              <h2>
-                {selectedWeek?.label} / {selectedDay}
-              </h2>
-            </div>
-            <span className="pill">{selectedExercises.length} exercises</span>
-          </div>
-
-          <section className="summary-grid">
-            <article className="summary-card">
-              <span>Total sets</span>
-              <strong>{totalSets}</strong>
-            </article>
-            <article className="summary-card">
-              <span>Current day weight</span>
-              <strong>{totalWeight} kg</strong>
-              <small>reps x weight</small>
-            </article>
-            <article className="summary-card timer-card">
-              <span>Workout time</span>
-              <strong>{formatDuration(selectedWorkout.durationSeconds)}</strong>
-              <div className="timer-actions">
-                <button
-                  type="button"
-                  onClick={() => setRunningTimer((isRunning) => !isRunning)}
-                >
-                  {runningTimer ? 'Stop' : 'Start'}
-                </button>
-                <button className="secondary-button" type="button" onClick={resetTimer}>
-                  Reset
-                </button>
-              </div>
-            </article>
-          </section>
-
-          <form className="exercise-form" onSubmit={addExercise}>
-            <label>
-              Exercise
-              <input
-                type="text"
-                value={exerciseForm.name}
-                onChange={(event) =>
-                  setExerciseForm({ ...exerciseForm, name: event.target.value })
-                }
-                placeholder="Shoulder Press"
-              />
-            </label>
-            <label>
-              Reps
-              <input
-                type="number"
-                min="0"
-                value={exerciseForm.reps}
-                onChange={(event) =>
-                  setExerciseForm({
-                    ...exerciseForm,
-                    reps: Number(event.target.value),
-                  })
-                }
-              />
-            </label>
-            <label>
-              Weight (kg)
-              <input
-                type="number"
-                min="0"
-                value={exerciseForm.weight}
-                onChange={(event) =>
-                  setExerciseForm({
-                    ...exerciseForm,
-                    weight: Number(event.target.value),
-                  })
-                }
-              />
-            </label>
-            <button type="submit">Add Exercise</button>
-          </form>
-
-          <div className="exercise-list">
-            {selectedExercises.length === 0 ? (
-              <div className="empty-state">
-                No exercises added for {selectedWeek?.label} {selectedDay}. Add
-                your first workout above.
-              </div>
-            ) : (
-              selectedExercises.map((exercise) => (
-                <article className="exercise-card" key={exercise.id}>
-                  <div className="exercise-card__header">
-                    <h3>{exercise.name}</h3>
-                    <button
-                      className="danger-button"
-                      type="button"
-                      onClick={() => removeExercise(exercise.id)}
-                    >
-                      Remove
-                    </button>
-                  </div>
-
-                  <div className="set-table">
-                    <div className="set-row set-row--heading">
-                      <span>Set</span>
-                      <span>Reps</span>
-                      <span>Weight (kg)</span>
-                    </div>
-                    {exercise.sets.map((set, index) => (
-                      <div className="set-row" key={set.id}>
-                        <span>{index + 1}</span>
-                        <input
-                          type="number"
-                          min="0"
-                          value={set.reps}
-                          onChange={(event) =>
-                            updateSet(
-                              exercise.id,
-                              set.id,
-                              'reps',
-                              Number(event.target.value)
-                            )
-                          }
-                        />
-                        <input
-                          type="number"
-                          min="0"
-                          value={set.weight}
-                          onChange={(event) =>
-                            updateSet(
-                              exercise.id,
-                              set.id,
-                              'weight',
-                              Number(event.target.value)
-                            )
-                          }
-                        />
-                      </div>
-                    ))}
-                  </div>
-
-                  <button
-                    className="secondary-button"
-                    type="button"
-                    onClick={() => addSet(exercise.id)}
-                  >
-                    Add Set
-                  </button>
-                </article>
-              ))
-            )}
-          </div>
-        </section>
-      </section>
-
-      <section className="json-preview">
-        <div className="section-header">
-          <div>
-            <p className="eyebrow">React JSON</p>
-            <h2>Stored User Details</h2>
-          </div>
-        </div>
-        <pre>{JSON.stringify(currentUser, null, 2)}</pre>
-      </section>
-    </main>
+      <main className="dashboard">
+        {currentView === "home" ? (
+          <HomePage
+            days={DAYS}
+            selectedDay={selectedDay}
+            summaries={dailySummaries}
+            chatMessages={chatMessages}
+            isChatSending={isChatSending}
+            onSaveSteps={handleSaveSteps}
+            onSendChatMessage={handleSendChatMessage}
+          />
+        ) : currentView === "exercises" ? (
+          <ExerciseLibrary exercises={EXERCISE_GUIDE} savedJson={browserJson} />
+        ) : currentView === "bmi" ? (
+          <BmiCalculator />
+        ) : currentView === "bodyFat" ? (
+          <BodyFatCalculator />
+        ) : currentView === "aiSupport" ? (
+          <AiSupport
+            chatMessages={chatMessages}
+            isChatSending={isChatSending}
+            onSendChatMessage={handleSendChatMessage}
+          />
+        ) : (
+          <>
+            <DashboardHeader />
+            <StatsGrid stats={dashboardStats} />
+            <WorkoutSection
+              exercises={exercises}
+              selectedDay={selectedDay}
+              onAddExercise={handleAddExercise}
+              onAddSet={handleAddSet}
+              onRemoveExercise={handleRemoveExercise}
+            />
+          </>
+        )}
+      </main>
+    </div>
   );
 }
 
